@@ -1,27 +1,39 @@
-from endpoints import CINEMAS_URL, MOVIES_IN_CINEMA_URL
+from endpoints import CINEMAS_URL, MOVIES_IN_CINEMA_URL, CINEMAS_JSON_PATH
 import requests
 import sys
+import json
 sys.stdout.reconfigure(encoding='utf-8')
     
 class MoviesAPI:
     def __init__(self):
         self._cinemas_url = CINEMAS_URL
         self._movies_in_cinema_url = MOVIES_IN_CINEMA_URL
+        self._cinemas_path = CINEMAS_JSON_PATH
         self._cinemas_cache = {}
-        
+
         self._set_cinemas_cache()
 
     def _set_cinemas_cache(self):
-        cinemas = self.api_call(self._cinemas_url)
-        if not cinemas:
-            raise ValueError("Failed to retrieve cinemas for caching.")
-        cinema_list = cinemas['body']['cinemas']
-        for cinema in cinema_list:
-            self._cinemas_cache[cinema['displayName']] = {'id': cinema['id']}
-            # In the future maybe add more details to the cache, like location, address, etc.
 
-    def get_cinemas_cache(self):
-        return self._cinemas_cache
+        file_data = self.read_file(self._cinemas_path)
+        if not file_data:
+            print("No cinema cache found. Fetching from API...")
+            api_cinema_data = self.api_call(self._cinemas_url)
+            self._build_cinemas_cache(api_cinema_data)
+            self.write_file(self._cinemas_cache, self._cinemas_path)
+        else:
+            print("Cinema cache loaded from file.")
+            self._cinemas_cache = file_data
+
+    def _build_cinemas_cache(self, cinema_data):
+        if not cinema_data:
+            raise ValueError("No cinema data provided to build cache.")
+        
+        for cinema in cinema_data['body']['cinemas']:
+            self._cinemas_cache[cinema['displayName']] = {
+                'id': cinema['id']}
+
+
 
     def api_call(self, url):
         try:
@@ -32,8 +44,24 @@ class MoviesAPI:
             print(f"API call failed: {e}")
             return None
         
-    def get_cinemas(self):
-        return self.api_call(self._cinemas_url)
+    def read_file(self, path):
+        print(f"Reading file from '{path}'...")
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"File '{path}' not found.")
+            return None
+
+    def write_file(self, data, path):
+
+        print(f"Writing file to '{path}'...")
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        except IOError as e:
+            print(f"Failed to write to file '{path}': {e}")
+
 
     def get_cinema_id_by_name(self, cinema_name):
         return self._cinemas_cache.get(cinema_name, {}).get('id')
