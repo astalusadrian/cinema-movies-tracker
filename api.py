@@ -1,51 +1,69 @@
-from endpoints import CINEMAS_URL, MOVIES_IN_CINEMA_URL, CINEMAS_JSON_PATH
+from endpoints import CINEMAS_URL, MOVIES_IN_CINEMA_URL, get_cinemas_json_path, get_cinemas_folder_path
+from datetime import datetime
+from pathlib import Path
 import requests
 import sys
 import json
+
 sys.stdout.reconfigure(encoding='utf-8')
     
 class MoviesAPI:
     def __init__(self):
         self._cinemas_url = CINEMAS_URL
         self._movies_in_cinema_url = MOVIES_IN_CINEMA_URL
-        self._cinemas_path = CINEMAS_JSON_PATH
-        self._cinemas_cache = {}
 
-        self._set_cinemas_cache()
+    def get_cinemas(self):
+        if self.already_has_snapshot_for_today():
+            print("Snapshot for today already exists. Skipping API call.")
+            return
+        cinemas_data_raw = self.api_call(self._cinemas_url)
+        cinemas_data_final = {}
+        if cinemas_data_raw:
+            cinemas_data = cinemas_data_raw.get('body',{}).get('cinemas', [])
+            if not cinemas_data:
+                print("No cinemas data found in the API response.")
+                return None
+            
+            for cinema_data in cinemas_data:
+                cinema_id  = str(cinema_data.get('id'))
+                cinemas_data_final[cinema_id] = {
+                    'groupId': cinema_data.get('groupId'),
+                    'displayName': cinema_data.get('displayName'),
+                    'link': cinema_data.get('link'),
+                    'imageUrl': cinema_data.get('imageUrl'),
+                    'address': cinema_data.get('addressInfo', {}).get('address1', ''),
+                    'city': cinema_data.get('addressInfo', {}).get('city', ''),
+                    'latitude': cinema_data.get('latitude'),
+                    'longitude': cinema_data.get('longitude'),
+                }
 
-    def _set_cinemas_cache(self):
+            self.create_cinemas_snapshot(cinemas_data_final)
 
-        file_data = self.read_file(self._cinemas_path)
-        if not file_data:
-            print("No cinema cache found. Fetching from API...")
-            api_cinema_data = self.api_call(self._cinemas_url)
-            self._build_cinemas_cache(api_cinema_data)
-            self.write_file(self._cinemas_cache, self._cinemas_path)
-        else:
-            print("Cinema cache loaded from file.")
-            self._cinemas_cache = file_data
+    def create_cinemas_snapshot(self, cinemas_data):
+        print("Creating a snapshot of the cinemas data...")
+        snapshot_path = get_cinemas_json_path()
+        self.write_file(cinemas_data, snapshot_path)
+        print(f"Cinemas snapshot created at '{snapshot_path}'.")
 
-    def _build_cinemas_cache(self, cinema_data):
-        if not cinema_data:
-            raise ValueError("No cinema data provided to build cache.")
-        
-        for cinema in cinema_data['body']['cinemas']:
-            self._cinemas_cache[cinema['displayName']] = {
-                'id': cinema['id']}
-
-
+    def already_has_snapshot_for_today(self):
+        todays_date = datetime.now().strftime("%Y-%m-%d")
+        folder = Path(get_cinemas_folder_path())
+        for file in folder.glob("cinemas_*.json"):
+            if todays_date in file.name:
+                return True
+        return False
 
     def api_call(self, url):
         try:
             response = requests.get(url)
             response.raise_for_status()
+            print("API call successful.")
             return response.json()
         except requests.RequestException as e:
             print(f"API call failed: {e}")
             return None
         
     def read_file(self, path):
-        print(f"Reading file from '{path}'...")
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -54,37 +72,12 @@ class MoviesAPI:
             return None
 
     def write_file(self, data, path):
-
-        print(f"Writing file to '{path}'...")
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
         except IOError as e:
             print(f"Failed to write to file '{path}': {e}")
 
-
-    def get_cinema_id_by_name(self, cinema_name):
-        return self._cinemas_cache.get(cinema_name, {}).get('id')
-
-    def get_movies_data_raw(self, cinema_name):
-        cinema_id = self.get_cinema_id_by_name(cinema_name)
-        if not cinema_id:
-            print(f"Cinema '{cinema_name}' not found in cache.")
-            return None
-
-        url = self._movies_in_cinema_url.format(cinema_id=cinema_id)
-        return self.api_call(url)
-    
-    def get_movies_in_cinema(self, cinema_name):
-        movies_data = self.get_movies_data_raw(cinema_name)
-        if not movies_data:
-            return None
-        
-        films = movies_data['body']['films']
-        for film in films:
-            print(f"Title: {film['name']}")
-            print(f"Release Year: {film['releaseYear']}")
-            print(f"Duration: {film['length']} minutes")
-            print(f"Genres: {', '.join(film['attributeIds'])}")
-            print("-" * 40)
-
+    def run(self):
+        print('Retrieving cinemas data...')
+        self.get_cinemas()

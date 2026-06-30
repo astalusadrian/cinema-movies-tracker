@@ -208,3 +208,4 @@ __marimo__/
 
 # Endpoints file
 endpoints.py
+data/raw
